@@ -1,6 +1,7 @@
 <?php
 require_once '../config/Database.php';
 require_once '../includes/functions.php';
+require_once '../includes/file_storage.php';
 
 // Only allow POST, GET, PUT, DELETE requests
 if (!in_array($_SERVER['REQUEST_METHOD'], ['GET', 'POST', 'PUT', 'DELETE'])) {
@@ -155,12 +156,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $notif_unit = $input['notif_unit'] ?? 'Menit';
     $attachment_path = $input['attachment_path'] ?? null;
     $invitations = $input['invitations'] ?? []; // Array of user IDs untuk agenda umum
+    $attachment = null;
     
     if (!$title || !$date_start || !$time_start) {
         sendResponse(false, 'Title, date_start, dan time_start harus diisi', null, 400);
     }
     
-    $query = "INSERT INTO agendas (user_id, title, description, date_start, date_end, time_start, time_end, location, agenda_type, notif_value, notif_unit, attachment_path, status) 
+    if ($attachment_path && strpos($attachment_path, 'db:agenda_upload:') === 0) {
+        $uploadId = (int) substr($attachment_path, strlen('db:agenda_upload:'));
+        $uploadQuery = "SELECT id, original_name, file_name, mime_type, file_size, file_data
+                        FROM agenda_uploads
+                        WHERE id = ? AND user_id = ?
+                        LIMIT 1";
+        $uploadStmt = $conn->prepare($uploadQuery);
+        if (!$uploadStmt) {
+            sendResponse(false, 'Query error: ' . $conn->error, null, 500);
+        }
+
+        $uploadStmt->bind_param('ii', $uploadId, $userId);
+        $uploadStmt->execute();
+        $uploadResult = $uploadStmt->get_result();
+        $attachment = $uploadResult->fetch_assoc();
+        $uploadStmt->close();
+
+        if (!$attachment) {
+            sendResponse(false, 'File agenda tidak ditemukan di database', null, 400);
+        }
+    }
+
+    $query = "INSERT INTO agendas (user_id, title, description, date_start, date_end, time_start, time_end, location, agenda_type, notif_value, notif_unit, attachment_path, status)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')";
     
     $stmt = $conn->prepare($query);
@@ -172,6 +196,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if ($stmt->execute()) {
         $agendaId = $conn->insert_id;
+        $finalAttachmentPath = $attachment ? "db:agenda:$agendaId" : $attachment_path;
+
+        if ($attachment) {
+            $attachmentName = $attachment['original_name'] ?: $attachment['file_name'];
+            $attachmentMimeType = $attachment['mime_type'];
+            $attachmentSize = (int) $attachment['file_size'];
+            $attachmentBlob = null;
+
+            $updateFileQuery = "UPDATE agendas
+                                SET attachment_path = ?, attachment_name = ?, attachment_mime_type = ?, attachment_size = ?, attachment_data = ?
+                                WHERE id = ?";
+            $updateFileStmt = $conn->prepare($updateFileQuery);
+            if (!$updateFileStmt) {
+                $stmt->close();
+                $database->close();
+                sendResponse(false, 'Query error: ' . $conn->error, null, 500);
+            }
+
+            $updateFileStmt->bind_param(
+                'sssibi',
+                $finalAttachmentPath,
+                $attachmentName,
+                $attachmentMimeType,
+                $attachmentSize,
+                $attachmentBlob,
+                $agendaId
+            );
+
+            if (!bindBlobAndExecute($updateFileStmt, 4, $attachment['file_data'])) {
+                $updateFileStmt->close();
+                $stmt->close();
+                $database->close();
+                sendResponse(false, 'Gagal menyimpan lampiran agenda ke database', null, 500);
+            }
+            $updateFileStmt->close();
+
+            $deleteUploadQuery = "DELETE FROM agenda_uploads WHERE id = ?";
+            $deleteUploadStmt = $conn->prepare($deleteUploadQuery);
+            if ($deleteUploadStmt) {
+                $attachmentUploadId = (int) $attachment['id'];
+                $deleteUploadStmt->bind_param('i', $attachmentUploadId);
+                $deleteUploadStmt->execute();
+                $deleteUploadStmt->close();
+            }
+        }
         
         // Insert undangan jika agenda tipe umum
         if ($agenda_type === 'umum' && !empty($invitations)) {
@@ -215,7 +284,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         $stmt->close();
         $database->close();
-        sendResponse(true, 'Agenda berhasil dibuat', ['id' => $agendaId, 'type' => $agenda_type], 201);
+        sendResponse(true, 'Agenda berhasil dibuat', ['id' => $agendaId, 'type' => $agenda_type, 'attachment_path' => $finalAttachmentPath], 201);
     } else {
         $stmt->close();
         $database->close();

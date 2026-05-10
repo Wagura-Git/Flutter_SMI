@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS documents (
     doc_time TIME,
     document_number VARCHAR(100),
     file_path VARCHAR(255),
+    file_name VARCHAR(255),
+    file_mime_type VARCHAR(100),
+    file_size INT,
+    file_data LONGBLOB,
     status ENUM('draft', 'published', 'archived') DEFAULT 'draft',
     visibility ENUM('private', 'team', 'public') DEFAULT 'private',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -87,6 +91,10 @@ CREATE TABLE IF NOT EXISTS agendas (
     notif_value INT DEFAULT 30,
     notif_unit VARCHAR(20) DEFAULT 'Menit',
     attachment_path VARCHAR(255),
+    attachment_name VARCHAR(255),
+    attachment_mime_type VARCHAR(100),
+    attachment_size INT,
+    attachment_data LONGBLOB,
     status ENUM('scheduled', 'completed', 'cancelled') DEFAULT 'scheduled',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -95,6 +103,22 @@ CREATE TABLE IF NOT EXISTS agendas (
     INDEX idx_date (date_start),
     INDEX idx_type (agenda_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 5b. TABLE AGENDA_UPLOADS
+-- Temporary MySQL-backed uploads selected before an agenda row exists.
+CREATE TABLE IF NOT EXISTS agenda_uploads (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    original_name VARCHAR(255) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(100) NOT NULL,
+    file_size INT NOT NULL,
+    file_data LONGBLOB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 6. TABLE AGENDA_INVITATIONS
 CREATE TABLE IF NOT EXISTS agenda_invitations (

@@ -1,6 +1,7 @@
 <?php
 require_once '../config/Database.php';
 require_once '../includes/functions.php';
+require_once '../includes/file_storage.php';
 
 // Check request method
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
@@ -61,6 +62,7 @@ function handleGetDocuments() {
     $documents = [];
     while ($row = $result->fetch_assoc()) {
         $document_id = $row['id'];
+        unset($row['file_data']);
 
         // Get document access
         $access_query = "SELECT da.id, da.user_id, u.name as user_name, da.access_type, da.created_at
@@ -121,6 +123,7 @@ function handleCreateDocument() {
     $status = isset($input['status']) ? trim($input['status']) : 'draft';
     $visibility = isset($input['visibility']) ? trim($input['visibility']) : 'private';
     $file_path = null;
+    $file_upload = null;
 
     if (empty($doc_type)) {
         sendResponse(false, 'Jenis dokumen harus diisi', null, 400);
@@ -136,20 +139,10 @@ function handleCreateDocument() {
     }
 
     if (isset($_FILES['document_file']) && $_FILES['document_file']['error'] === UPLOAD_ERR_OK) {
-        $uploadDir = __DIR__ . '/../uploads/documents/';
-        if (!is_dir($uploadDir)) {
-            mkdir($uploadDir, 0777, true);
+        $file_upload = validateUploadedDocument($_FILES['document_file']);
+        if (!$file_upload['success']) {
+            sendResponse(false, $file_upload['message'], null, 400);
         }
-
-        $filename = basename($_FILES['document_file']['name']);
-        $safeFilename = uniqid() . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $filename);
-        $targetPath = $uploadDir . $safeFilename;
-
-        if (!move_uploaded_file($_FILES['document_file']['tmp_name'], $targetPath)) {
-            sendResponse(false, 'Gagal mengunggah file', null, 500);
-        }
-
-        $file_path = 'uploads/documents/' . $safeFilename;
     }
 
     // Validate status
@@ -216,6 +209,43 @@ function handleCreateDocument() {
 
     if ($insert_stmt->execute()) {
         $document_id = $insert_stmt->insert_id;
+
+        if ($file_upload) {
+            $file_path = "db:document:$document_id";
+            $file_name = $file_upload['original_name'];
+            $file_mime_type = $file_upload['mime_type'];
+            $file_size = $file_upload['size'];
+            $file_blob = null;
+
+            $file_update_query = "UPDATE documents
+                                  SET file_path = ?, file_name = ?, file_mime_type = ?, file_size = ?, file_data = ?
+                                  WHERE id = ?";
+            $file_update_stmt = $conn->prepare($file_update_query);
+            if (!$file_update_stmt) {
+                $insert_stmt->close();
+                $database->close();
+                sendResponse(false, 'Prepare error: ' . $conn->error, null, 500);
+            }
+
+            $file_update_stmt->bind_param(
+                'sssibi',
+                $file_path,
+                $file_name,
+                $file_mime_type,
+                $file_size,
+                $file_blob,
+                $document_id
+            );
+
+            if (!bindBlobAndExecute($file_update_stmt, 4, $file_upload['data'])) {
+                $file_update_stmt->close();
+                $insert_stmt->close();
+                $database->close();
+                sendResponse(false, 'Gagal menyimpan file ke database: ' . $file_update_stmt->error, null, 500);
+            }
+            $file_update_stmt->close();
+        }
+
         $insert_stmt->close();
         $database->close();
 
