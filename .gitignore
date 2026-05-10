@@ -1,0 +1,31 @@
+# Local database dumps
+backend/database.sql
+database.sql
+backup.sql
+
+# Runtime uploads (keep directory placeholders only)
+backend/uploads/**
+!backend/uploads/**/
+!backend/uploads/**/.gitkeep
+
+# Flutter/Dart generated files
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.pub-cache/
+**/.pub/
+**/build/
+
+# Local tool caches
+**/.codex-dart-home/
+**/.gradle-user-home/
+
+# IDE and OS files
+**/.idea/
+**/*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
